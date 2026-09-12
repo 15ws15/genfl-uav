@@ -23,7 +23,9 @@ results/**/*.pth
 # 로컬 문서 (리포에 올리지 않음)
 tmp/
 *.docx
-!GenFL-UAV_작업기록.docx   # 우리가 쓴 작업 기록은 추적한다 (논문 docx 만 제외 대상)
+# 우리가 쓴 작업 기록은 추적한다 (제외 대상은 논문 docx 뿐).
+# 주의: .gitignore 는 줄 끝 주석을 지원하지 않는다. 주석은 반드시 별도 줄에 쓸 것.
+!GenFL-UAV_작업기록.docx
 winet-lab-paper-reproduction.md
 
 # OS / IDE
