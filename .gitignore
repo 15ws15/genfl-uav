@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# 데이터셋 (재다운로드 가능)
+data/raw/
+data/cifar-10-batches-py/
+data/MNIST/
+data/FashionMNIST/
+*.tar.gz
+
+# 결과물 중 대용량
+results/**/*.pt
+results/**/*.pth
+*.ckpt
+
+# 논문 PDF (저작권)
+*.pdf
+
+# 로컬 문서 (리포에 올리지 않음)
+tmp/
+*.docx
+winet-lab-paper-reproduction.md
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
