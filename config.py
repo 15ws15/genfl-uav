@@ -22,9 +22,15 @@ N_CLIENTS_SWEEP = [50, 100]          # PUFL Sec.4
 AREA_SIZE_M     = 400.0              # PUFL Sec.4  400 x 400 m^2 정사각 영역
 UAV_ALT_M       = 100.0              # PUFL Table 1  H = 100 m
 N_HOVER_POINTS  = 3                  # PUFL Table 1  L = 3
-N_SUBCH_M       = 2                  # PUFL Sec.4  M = 2 또는 4
-SUBCH_SWEEP     = [2, 4]             # PUFL Sec.4
+N_SUBCH_M       = 2                  # PUFL Sec.4  M = 2 또는 4 (논문 기본)
+SUBCH_SWEEP     = [1, 2, 4]          # 2,4 = PUFL Sec.4 / 1 = OURS 단순화 조건
 ALT_SWEEP       = [50, 100, 200, 400]  # OURS. 고도 sweep (논문에 없는 확장)
+
+# UAV 호버링: 단말 위치 K-means로 L개 지점(Eq.1), 라운드마다 r % L 로 순회.
+# 지점 간 이동시간은 0으로 둔다 (비행 모델링 제외, 순회 메커니즘은 보존).
+# 지점을 1개로 고정하면 t_comm 이 라운드 내내 불변이 되어 먼 단말이 tau 필터에
+# 매번 걸리고 영구 배제된다. 순회는 반드시 유지할 것.
+UAV_TRAVEL_TIME_S = 0.0              # OURS. 이동시간 미모델링
 
 # tau: 클러스터 데드라인 최소 간격이자 통신 가능 판정 임계값 (이중 역할)
 # 데이터셋마다 모델 크기 s가 달라 t_comm 이 달라지므로 tau 도 다르다.
@@ -95,7 +101,7 @@ DIRICHLET_EXTRA  = [0.5, 10.0]       # OURS. 경향 확인용 추가 구간
 # 5. 집계  →  fl/aggregate.py   (PUFL Eq.(9))
 # ─────────────────────────────────────────────
 # 논문 식 (9)는 선택된 단말 수로 나누는 단순 평균이다 (데이터 수 가중 아님).
-AGGREGATION = "simple"               # PUFL Eq.(9). "weighted" 도 구현해 민감도 비교
+AGGREGATION = "simple"               # PUFL Eq.(9) 기본값. "weighted" 는 민감도 실험용
 
 # ─────────────────────────────────────────────
 # 6. 클러스터링  →  network/clustering.py   (PUFL Eq.(4),(5), Algorithm 1)
