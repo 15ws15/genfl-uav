@@ -27,7 +27,7 @@ def load_dataset(
     """(train_x, train_y, test_x, test_y) 를 정규화된 상주 텐서로 반환.
 
     DataLoader 를 쓰지 않는다. 클라이언트마다 DataLoader 를 만들면 오버헤드가
-    실제 연산을 압도한다 (CLAUDE.md 실행 환경 절). 학습은 인덱싱으로 배치를 뜬다.
+    실제 연산을 압도한다. 학습은 인덱싱으로 배치를 뜬다.
     """
     import torchvision.datasets as tvd
 
