@@ -32,6 +32,11 @@ ALT_SWEEP       = [50, 100, 200, 400]  # OURS. 고도 sweep (논문에 없는 �
 # 매번 걸리고 영구 배제된다. 순회는 반드시 유지할 것.
 UAV_TRAVEL_TIME_S = 0.0              # OURS. 이동시간 미모델링
 
+# K-means (호버링 지점 전용, PUFL Eq.(1)) 내부 상수. sklearn 을 쓰지 않고 직접 구현한다
+# — L=3 짜리 2차원 군집화에 scipy 의존을 더할 이유가 없다.
+KMEANS_N_INIT   = 10                 # OURS. k-means++ 재시작 횟수
+KMEANS_MAX_ITER = 100                # OURS. Lloyd 반복 상한
+
 # tau: 클러스터 데드라인 최소 간격이자 통신 가능 판정 임계값 (이중 역할)
 # 데이터셋마다 모델 크기 s가 달라 t_comm 이 달라지므로 tau 도 다르다.
 TAU_S_BY_DATASET = {                 # PUFL Table 5 (채택값)
@@ -39,9 +44,24 @@ TAU_S_BY_DATASET = {                 # PUFL Table 5 (채택값)
     "fashion_mnist": 0.006,
     "cifar10":       0.10,
 }
-TAU_S      = TAU_S_BY_DATASET["cifar10"]
-TAU_SWEEP  = [0.06, 0.08, 0.10, 0.12]        # PUFL Table 5 (CIFAR-10 후보)
+TAU_SWEEP_PAPER = [0.06, 0.08, 0.10, 0.12]      # PUFL Table 5 (CIFAR-10 후보)
 TAU_SWEEP_MNIST = [0.002, 0.006, 0.010, 0.014]  # PUFL Table 5 (MNIST/FMNIST 후보)
+
+# 우리 채널에서 재조정한 tau (B 단계 측정). 논문 값을 그대로 쓰면 tau=0.10 에서
+# t_comm(d=100m)=0.1038 s 라 **전원 탈락**한다. 채널 모델이 논문보다 약 4 dB 비관적이고
+# (EXCESS_LOSS_DB 주석 참조) t_comp spread 도 0.685 s 로 논문의 1.0 s 보다 작기 때문이다.
+#
+# 채택 기준: 라운드당 평균 선택 단말 수 최대. K=50, M=2, 시드 3개 x 호버링 3지점 평균:
+#   tau   0.10   0.12   0.15   0.20   0.25
+#   통과   0.0    3.0    9.9   15.0   19.2
+#   선택   0.0    3.0    9.3    7.3    5.3   <- 0.15 에서 최대
+# tau 를 더 키우면 필터는 느슨해지지만 J=floor(spread/tau) 가 더 빨리 줄어 참여가 준다.
+# tau 의 이중 역할이 만드는 정점이며, 논문 Table 5 의 0 / 6 / 20 / 16 구조와 같은 모양이다.
+TAU_S      = 0.15                               # OURS (B 단계 재조정)
+TAU_SWEEP  = [0.10, 0.12, 0.15, 0.20]           # OURS. Table 5 와 같은 4점 구조
+
+# 주의: M=4 에서는 정점이 tau=0.20 쪽으로 밀린다 (선택 13.9). 논문은 데이터셋마다
+# tau 하나만 쓰므로 우리도 M=2 기준 하나로 고정한다. M sweep 해석 시 이 점을 밝힌다.
 
 # ─────────────────────────────────────────────
 # 2. 무선 채널  →  network/channel.py   (PUFL Eq.(6))
@@ -62,8 +82,31 @@ SPEED_OF_LIGHT  = 3e8
 # 본 프로젝트는 d^(-beta) 로 구현한다. tests/test_channel.py 가 이를 검증한다.
 PATHLOSS_SIGN   = -1                 # OURS. 논문 표기 오류로 판단한 부호 보정
 
-# 모델 파라미터 벡터 크기 s [bit] — 논문은 값을 명시하지 않음
-MODEL_SIZE_BIT  = None               # TODO: CIFAR-10 CNN 파라미터 수 x 32bit 로 산출
+# 채널 모드 — 논문 식에 단위가 맞지 않는 부분이 있어 두 구현을 나란히 둔다.
+#   "fixed"   (기본, OURS) 대규모 alpha_0*d^(-beta) 만 거리 의존.
+#             소규모는 평균 전력 1 로 정규화한 Rician 이고, eta^LoS/eta^NLoS 는
+#             K-bar 전력 가중 평균 초과손실로 반영한다. 거리 ↑ → 전송률 ↓ 보장.
+#   "literal" (비교용)     논문 식을 문자 그대로. alpha_0*d^(+beta) 이고
+#             dB 단위 PL 을 페이딩 진폭에 그대로 더한다. 거리 ↑ → 전송률 ↑ 라는
+#             비물리적 결과가 나오며, 리포트에 "문자대로 구현하면 이렇게 된다"는
+#             근거로만 쓴다. 실험 기본값으로 쓰지 않는다.
+CHANNEL_MODE    = "fixed"            # OURS
+
+# fixed 모드의 초과손실 [dB]. eta^LoS / eta^NLoS 를 Rician 전력비로 가중 평균한 값:
+#   K/(K+1)*1 + 1/(K+1)*20 = 0.4924*1 + 0.5076*20 = 10.64 dB   (K-bar = 0.97)
+# 논문은 Rician K-bar(소규모 페이딩)와 eta(Al-Hourani 계열 LoS/NLoS 초과손실)를 한 식에
+# 섞어 놓았다. 엄밀하게는 LoS 확률을 앙각으로 구해야 하지만 그 파라미터가 논문에 없다.
+# 지어내지 않고, 논문이 준 두 값의 전력가중 평균을 쓴다. 물리적 상·하한은
+# 1 dB (LoS 전용) ~ 20 dB (NLoS 전용) 이므로 이 값은 그 사이다.
+# 이것이 tau 조정의 손잡이다. 값을 바꾸면 tau 운용점도 같이 옮겨야 한다.
+EXCESS_LOSS_DB  = 10.64              # OURS (논문 Table 1 의 eta, K-bar 에서 유도)
+
+# 모델 파라미터 벡터 크기 s [bit] — 논문은 값을 명시하지 않음.
+# models/cnn.py 의 CIFAR-10 CNN 파라미터 69,706개 x 32bit 로 산출 (A 단계에서 확정).
+#   conv1 5*5*3*32+32 = 2,432 / conv2 5*5*32*64+64 = 51,264 / fc 1600*10+10 = 16,010
+# 모델을 바꾸면 이 값도 바뀐다. tests/test_model.py 가 불일치를 잡는다.
+# 데이터셋별로 다르므로 CIFAR-10 외를 쓸 때는 models.cnn.model_size_bit(name) 를 쓴다.
+MODEL_SIZE_BIT  = 2_230_592          # OURS (69,706 params x 32 bit ~= 2.23 Mbit)
 
 # ─────────────────────────────────────────────
 # 3. 단말 계산  →  network/device.py   (PUFL Eq.(3))
@@ -80,7 +123,7 @@ DATASET       = "cifar10"            # PUFL Sec.4  MNIST / Fashion-MNIST / CIFAR
 LOCAL_EPOCHS  = 3                    # PUFL Sec.4  e_local = 3
 LEARNING_RATE = 0.01                 # PUFL Sec.4
 OPTIMIZER     = "sgd"                # PUFL Sec.4  (momentum 등 세부는 미명시)
-BATCH_SIZE    = 64                   # OURS. 논문 미명시. Colab GPU 오버헤드 고려한 값
+BATCH_SIZE    = 64                   # OURS. 논문 미명시. GPU 커널 실행 오버헤드 고려한 값
 N_ROUNDS      = 800                  # PUFL Sec.4  r_max = 800
 
 TARGET_ACC = {                       # PUFL Sec.4  수렴속도 판정 기준
@@ -96,6 +139,21 @@ TARGET_ACC = {                       # PUFL Sec.4  수렴속도 판정 기준
 DIRICHLET_ALPHA  = 0.05              # PUFL Sec.4  강한 non-IID 기본 설정
 DIRICHLET_SWEEP  = [0.05, 0.1, 1.0]  # PUFL Table 4 에서 사용된 alpha 값
 DIRICHLET_EXTRA  = [0.5, 10.0]       # OURS. 경향 확인용 추가 구간
+
+DATA_ROOT = "data"                   # OURS. torchvision 다운로드 위치 (.gitignore 제외됨)
+
+# 채널 평균/표준편차 — 논문 미명시. 각 데이터셋의 통용값.
+NORM_STATS = {                       # OURS
+    "cifar10":       ((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616)),
+    "mnist":         ((0.1307,), (0.3081,)),
+    "fashion_mnist": ((0.2860,), (0.3530,)),
+}
+
+# Dirichlet 분할에서 단말당 최소 샘플 수.
+# alpha=0.05, K=50 의 per-class Dirichlet 은 절반 가까운 단말에 0개를 할당한다.
+# 샘플이 0개면 학습이 불가하고 t_comp=0 이 되어 클러스터 1을 점유하는 버그가 된다.
+# 빈 단말은 최대 보유 단말의 최다 클래스에서 이만큼 떼어 채운다 (label skew 보존).
+MIN_CLIENT_SAMPLES = 10              # OURS. 논문 미명시
 
 # ─────────────────────────────────────────────
 # 5. 집계  →  fl/aggregate.py   (PUFL Eq.(9))
@@ -113,6 +171,15 @@ AGGREGATION = "simple"               # PUFL Eq.(9) 기본값. "weighted" 는 민
 #   3) n_j = floor(K/J) + 1{j <= K mod J} 개씩 순차 배정
 #   4) theta_j = max(max_{k in C_j} t_comp_k, theta_{j-1} + tau),  theta_0 = 0
 # 이다. 특징 정규화나 (t_comp, t_comm) 2차원 군집화는 논문에 없다.
+#
+# 가드: spread < tau 이면 2)의 J 가 0 이 되어 3)의 floor(K/J) 가 0 division 이다.
+# J = max(1, floor(...)) 로 막는다. J == 1 이면 파이프라인은 sync 와 동일해진다.
+#
+# J 는 config 상수가 아니라 Dirichlet 추첨에 딸린 확률변수다. t_comp = e*c_k*D_k/f_k
+# 이므로 spread 를 사실상 max D_k 가 정한다. 논문 Table 5 (CIFAR-10, K=50) 를 역산하면
+# J*tau ~= 1.0 (16x0.06, 12x0.08, 10x0.10, 8x0.12) 이고, 따라서 spread ~= 1.00~1.02 s,
+# c=9e4 / f=1e9 기준 max D_k ~= 3700 이다. seed 마다 J 가 달라지므로 결과 CSV에
+# J 와 n_selected 를 기록한다. 상세는 CLAUDE.md "Table 5 역산 결과" 참조.
 
 # ─────────────────────────────────────────────
 # 7. 단말 선택  →  fl/selection.py   (PUFL Eq.(8), Algorithm 2)
@@ -142,9 +209,16 @@ WARMUP_ROUNDS = 1                    # OURS. r' (직전 참여 라운드) 미정
 # ─────────────────────────────────────────────
 # 8. 비교 방법 정의   (PUFL Sec.4 baselines)
 # ─────────────────────────────────────────────
+# n_select: 라운드당 참여 단말 수.  "M" = M 대,  "MJ" = M x J 대 (클러스터마다 M 대)
+# 논문의 4방법에서는 n_select 가 pipeline 에서 따라 나오지만, FedAvg-MJ 가 그 결합을
+# 끊으므로 별도 필드로 둔다.
 METHODS = {
-    "FedAvg": {"pipeline": False, "utility": False},   # 무작위 선택, 비파이프라인
-    "PT":     {"pipeline": True,  "utility": False},   # 파이프라인 + 무작위 선택
-    "UBS":    {"pipeline": False, "utility": True},    # 비파이프라인 + utility 선택
-    "PUFL":   {"pipeline": True,  "utility": True},    # 제안 기법
+    "FedAvg":    {"pipeline": False, "utility": False, "n_select": "M"},   # 기준선
+    "PT":        {"pipeline": True,  "utility": False, "n_select": "MJ"},  # 파이프라인 단독
+    "UBS":       {"pipeline": False, "utility": True,  "n_select": "M"},   # utility 단독
+    "PUFL":      {"pipeline": True,  "utility": True,  "n_select": "MJ"},  # 제안 기법
+    # 참여 규모 통제 baseline (OURS). 파이프라인 없이 M x J 대를 무작위로 뽑고
+    # 업로드를 전부 직렬로 기다린다. PUFL 과 참여 수가 같으므로
+    # "단말을 10배 더 썼으니 이기는 것 아니냐"는 반론을 시간 축에서 분리해 막는다.
+    "FedAvg-MJ": {"pipeline": False, "utility": False, "n_select": "MJ"},
 }
