@@ -7,7 +7,7 @@ release 를 무엇으로 주느냐만 바꾸면 스케줄러 종류가 갈린다
     sync   : 전원이 학습을 마칠 때까지 기다렸다가 업로드   release = max(t_comp)
     greedy : 학습이 끝나는 대로 빈 채널에 바로 업로드      release = t_comp_k
 
-C 단계의 pipelined 는 release = 클러스터 데드라인 theta_j 로 같은 primitive 를 쓴다.
+    pipelined : 클러스터 데드라인에 맞춰 단계별로 업로드        release = theta[labels]
 """
 
 from __future__ import annotations
@@ -75,6 +75,23 @@ def greedy_round_time(
     나은지를 직접 시험한다. 리포트에 넣을지는 사용자가 결정한다.
     """
     return upload_finish(t_comp, t_comm, n_subch)
+
+
+def pipelined_round_time(
+    t_comm: np.ndarray,
+    labels: np.ndarray,
+    theta: np.ndarray,
+    n_subch: int = cfg.N_SUBCH_M,
+) -> float:
+    """파이프라인 라운드 시간. release = 자기 클러스터의 데드라인 theta_j.  PUFL Sec.3.5
+
+    `network.clustering.cluster` 가 준 (labels, theta) 를 그대로 받는다.
+    labels / t_comm 은 **같은 단말 집합**(보통 선택된 단말)에 대한 배열이어야 한다.
+
+    주의: sync 와의 대소는 정리가 아니다. theta_J 가 max t_comp 를 넘으면 파이프라인
+    라운드가 더 길어질 수 있고, 그것이 이 프로젝트가 찾는 정량적 한계다. 비율로 측정한다.
+    """
+    return upload_finish(np.asarray(theta)[np.asarray(labels)], t_comm, n_subch)
 
 
 if __name__ == "__main__":
