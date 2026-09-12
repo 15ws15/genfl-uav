@@ -103,6 +103,29 @@ FedAvg-MJ 는 파이프라인 없이 매 라운드 M×J 대를 무작위로 뽑�
 "파이프라인은 참여 규모를 공짜로 산다"는 주장을 시간 축에서 검증하는 칸이다.
 이 칸이 없으면 "단말을 10배 더 썼으니 당연히 이기는 것 아니냐"는 반론을 막을 수 없다.
 
+### greedy 스케줄러 대조 (확정: 옵션 (a))
+파이프라인은 클러스터링 + tau + t_comp 사전 수집이라는 조율 장치를 요구한다.
+그런데 **"학습 끝나면 빈 채널에 바로 올린다"** 는 아무 장치 없는 정책도 같은 중첩을
+만든다. 빠른 단말이 업로드하는 동안 느린 단말은 어차피 아직 학습 중이기 때문이다.
+파이프라인의 시간 이득이 클러스터링에서 오는지 단순 중첩에서 오는지 분리해야 한다.
+
+**채택 방식 (a): 선택은 그대로 두고 스케줄링만 바꿔 시간을 다시 잰다.**
+같은 참여 단말이면 정확도는 동일하므로(위 불변 조건), **추가 학습 run 이 필요 없다.**
+한 번의 run 에서 `round_duration` 을 파이프라인 기준과 greedy 기준으로 **둘 다 기록**한다.
+GPU 비용 0, CSV 컬럼 하나 추가로 끝난다.
+
+- 구현: `scheduler.upload_finish` 에 release 를 theta_j(파이프라인) / t_comp_k(greedy) 로
+  각각 넘겨 두 값을 얻는다. 이미 있는 함수라 새 코드가 거의 없다.
+- greedy 가 비슷하거나 빠르면 → "시간 이득은 클러스터링이 아니라 단순 중첩에서 온다"는
+  정량적 발견이다. 논문이 검증하지 않은 지점이므로 **이 프로젝트의 성과로 보고한다.**
+- 파이프라인이 이기면 → 클러스터링이 값을 한다는 증거다. 역시 그대로 보고한다.
+- 하지 않는 것(옵션 b): 선택까지 greedy 로 바꾸기(전역 Top-(M x J)). 별도 학습 run 이
+  필요하다. 예산이 남을 때만 한다. 이 경우 클러스터링의 **계층화** 역할(빠른 단말과
+  느린 단말을 골고루 뽑음)까지 시험하게 된다.
+
+주의: `greedy <= pipelined` 는 정리가 아니다. 무작위 인스턴스에서 반례가 0.55% 나온다
+(처리 순서 의존). 단정하지 말고 측정해서 비율로 보고한다.
+
 ## 아키텍처 원칙 (반드시 지킬 것)
 1. **가상 시계**: `time.sleep()`·실제 통신 금지. 실행은 for문 순차, 시간은 별도 계산.
    - 연산: T_train_i = (E × |D_i| × C) / f_i
@@ -236,8 +259,12 @@ genfl-uav/
 - **클러스터링 주의**: K-means는 단말 위치로 호버링 포인트 L개를 정할 때만 쓴다(Eq.1).
   파이프라인용 단말 클러스터링은 t_comp 정렬 + tau 기반 분할이며 K-means가 아니다.
   상세 절차는 config.py 6절 주석 참조.
-- 결과 csv 컬럼: round, sim_time, **round_duration**, accuracy, method, scheduler,
-  selection, **J**, **n_selected**, alpha, altitude, n_subch, aggregation, seed.
+- 결과 csv 컬럼: round, sim_time, **round_duration**, **round_duration_greedy**,
+  accuracy, method, scheduler, selection, **J**, **n_selected**,
+  alpha, altitude, n_subch, aggregation, seed.
+  - `round_duration_greedy` — 같은 선택 단말을 greedy 로 올렸을 때의 라운드 시간.
+    정확도는 동일하므로 한 run 에서 함께 기록한다 (위 "greedy 스케줄러 대조" 참조).
+    비파이프라인 방법(FedAvg, UBS)에서는 `round_duration` 과 같은 값이 들어간다.
   - `round_duration` — 이 라운드에 걸린 가상 시간. "파이프라인이 라운드 길이를
     유지하는가"가 이 프로젝트의 핵심 검증이므로 라운드마다 따로 기록해야 한다.
     `sim_time` 의 차분으로 대체하지 말 것 (그래프 스크립트에서 방법별로 섞인다).
