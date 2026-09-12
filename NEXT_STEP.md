@@ -9,7 +9,7 @@
 ## 0. 먼저 할 일
 
 ```powershell
-git branch --show-current                                          # step-ab-network-model
+git branch --show-current                                          # dev
 foreach ($f in Get-ChildItem tests/test_*.py) { python $f.FullName }   # 7파일 59개 전부 통과
 python experiments/exp1_gate_table5.py --out results/exp1_gate_table5.csv   # "D 게이트 통과"
 python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
@@ -20,7 +20,10 @@ python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 
 ## 1. 현재 상태
 
-A, B, C, D 완료. 커밋 4개가 `step-ab-network-model` 브랜치에 있다 (main 미병합).
+A, B, C, D 완료. 커밋 9개가 `dev` 브랜치에 있다 (main 미병합, 원격 push 됨).
+main 에는 `config.py` / `CLAUDE.md` / `README.md` 뿐이다 — **코드는 전부 `dev` 에 있다.**
+G(README·리포트)까지 마치고 파일을 정리한 뒤 한 번에 PR 을 연다는 것이 사용자의 방침이다.
+(A~D 로 열었던 PR #1 은 그 방침에 따라 닫았다. 커밋은 그대로 남아 있다.)
 
 | 완료 | 내용 |
 |---|---|
