@@ -200,10 +200,32 @@ GPU 성능 주의 (FL 시뮬레이션 특유의 함정):
   클라이언트마다 DataLoader를 만들면 오버헤드가 실제 연산을 압도한다. 3~5배 차이.
 - BATCH_SIZE는 64~128. 너무 작으면 커널 실행 오버헤드가 커진다.
 
+## 작업 순서 (Phase 번호가 아니라 이 순서대로 진행한다)
+네트워크 시간 모델을 학습보다 먼저 만든다. 이유:
+학습 없이 논문 Table 5와 직접 대조해 검증할 수 있고, 이 프로젝트에서 틀리기 쉬운 부분이
+FedAvg가 아니라 채널·클러스터링·스케줄러 쪽이며, 로컬에서 GPU 없이 끝나므로
+Kaggle 시간을 쓰기 전에 설계를 확정할 수 있기 때문이다.
+
+| 순서 | 내용 | 환경 |
+|---|---|---|
+| A | Step 1 — 데이터 로딩, IID / Dirichlet 분할 | 로컬 |
+| B | Step 5~7 — 연산시간, UAV 채널, 가상 시계 + 기본 라운드 시간 | 로컬 |
+| C | Step 8~10 — 클러스터링, 파이프라인 스케줄러, Utility 선택 | 로컬 |
+| D | **검증 게이트** — 논문 Table 5 재현으로 B·C 확인 | 로컬 |
+| E | Step 2~4 — 중앙집중 baseline, FedAvg, non-IID 학습 | 로컬 (MNIST 축소) |
+| F | Step 11~13 — CIFAR-10 본 실험 | Kaggle |
+| G | Step 14 — README, 리포트 | 로컬 |
+
+D를 통과하지 못하면 F로 넘어가지 않는다. GPU 시간을 쓰기 전의 필수 관문이다.
+
 ## 진행 현황 (수동 갱신)
-- [ ] Phase 0: 논문 접근 확인, config.py 파라미터 표 (Table 1 기준)
-- [ ] Phase 1: IID 분할 → 중앙집중 baseline → FedAvg → Dirichlet non-IID(0.05 포함)
-- [ ] Phase 2: 연산시간 → UAV 채널(부호 테스트) → 가상 시계 + sync 라운드
-- [ ] Phase 3: 클러스터링 → pipelined 스케줄러(M 파라미터) → Utility 선택 + 워밍업
-- [ ] Phase 4: 4방법 매트릭스 → M sweep → 고도 sweep → 집계 민감도 → README/리포트
-- [ ] Phase 5(선택): shared subset 증강 → cVAE
+- [x] Phase 0: 논문 확보, config.py 파라미터 표 (Table 1/4/5, Sec.4 반영 완료)
+- [x] 리포지토리 생성: https://github.com/15ws15/genfl-uav
+- [ ] A: 데이터 로딩 + IID / Dirichlet(0.05 포함) 분할
+- [ ] B: 연산시간 → UAV 채널(부호 테스트) → 가상 시계 + 기본 라운드 시간
+- [ ] C: 클러스터링(정렬 기반) → 파이프라인 스케줄러(M개 채널) → Utility 선택 + 워밍업
+- [ ] D: 검증 게이트 — tau sweep으로 J / 평균 선택 단말 수가 논문 Table 5 경향과 일치
+- [ ] E: 중앙집중 baseline → FedAvg → non-IID 학습 (MNIST 축소 검증)
+- [ ] F: 4방법 매트릭스 → alpha sweep → M sweep → 고도 sweep → 집계 민감도 (Kaggle)
+- [ ] G: README, 리포트
+- [ ] 선택: shared subset 증강 → cVAE (F 완료 전 시작 금지)
